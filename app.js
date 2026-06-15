@@ -153,6 +153,25 @@ function fmt(n) {
   return Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+function haptic(ms = 8) {
+  try { if (navigator.vibrate) navigator.vibrate(ms); } catch {}
+}
+
+function shakeInput(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('error');
+  el.animate([
+    { transform: 'translateX(0)' },
+    { transform: 'translateX(-6px)' },
+    { transform: 'translateX(6px)' },
+    { transform: 'translateX(-4px)' },
+    { transform: 'translateX(0)' },
+  ], { duration: 300, easing: 'ease' });
+  setTimeout(() => el.classList.remove('error'), 1500);
+  el.focus();
+}
+
 function showToast(msg, type = '') {
   let el = document.getElementById('kf-toast');
   if (!el) {
@@ -313,6 +332,7 @@ function filterCat(id, el) {
 }
 
 function buyProduct(id) {
+  haptic(10);
   const p = PRODUCTS.find(x => x.id === id);
   if (!p) return;
   S.product = p;
@@ -405,10 +425,10 @@ async function submitStep1() {
   const tn   = (document.getElementById('techN')?.value || '');
   const ph   = (document.getElementById('phone')?.value || '').replace(/\D/g, '');
 
-  if (!gov)            { showToast('Davlat raqamini kiriting', 'error'); return; }
-  if (ts.length < 2)   { showToast('Texnik pasport seriasini kiriting', 'error'); return; }
-  if (tn.length < 7)   { showToast('Texnik pasport raqamini kiriting', 'error'); return; }
-  if (ph.length < 9)   { showToast('Telefon raqamini kiriting', 'error'); return; }
+  if (!gov)            { haptic(20); shakeInput('govNum'); showToast('Davlat raqamini kiriting', 'error'); return; }
+  if (ts.length < 2)   { haptic(20); shakeInput('techS'); showToast('Texnik pasport seriasini kiriting', 'error'); return; }
+  if (tn.length < 7)   { haptic(20); shakeInput('techN'); showToast('Texnik pasport raqamini kiriting', 'error'); return; }
+  if (ph.length < 9)   { haptic(20); shakeInput('phone'); showToast('Telefon raqamini kiriting', 'error'); return; }
 
   S.form.govNumber = gov;
   S.form.techSeria = ts;
@@ -501,9 +521,9 @@ async function submitStep2() {
   const ps    = (document.getElementById('pSeria')?.value || '').toUpperCase().trim();
   const pn    = (document.getElementById('pNum')?.value || '').trim();
 
-  if (pinfl.length !== 14) { showToast("PINFL 14 ta raqamdan iborat", 'error'); return; }
-  if (ps.length < 2)       { showToast("Pasport seriasini kiriting", 'error'); return; }
-  if (pn.length < 7)       { showToast("Pasport raqamini kiriting", 'error'); return; }
+  if (pinfl.length !== 14) { haptic(20); shakeInput('pinfl'); showToast("PINFL 14 ta raqamdan iborat", 'error'); return; }
+  if (ps.length < 2)       { haptic(20); shakeInput('pSeria'); showToast("Pasport seriasini kiriting", 'error'); return; }
+  if (pn.length < 7)       { haptic(20); shakeInput('pNum'); showToast("Pasport raqamini kiriting", 'error'); return; }
 
   S.form.pinfl   = pinfl;
   S.form.pSeria  = ps;
@@ -707,7 +727,10 @@ SCREENS.success = (p) => {
   const policyNum = 'KF-' + Date.now().toString().slice(-8);
   return `
   <div class="success-wrap">
-    <div class="success-circle">✓</div>
+    <svg class="check-anim" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="40" cy="40" r="38" stroke="#C0282C" stroke-width="2.5" fill="none"/>
+      <path d="M24 40l10 10 22-20" stroke="#C0282C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
     <h2 class="success-title">Polis rasmiylashtirildi!</h2>
     <p class="success-sub">
       Sug'urta polisi muvaffaqiyatli rasmiylashtirildi.<br>
@@ -730,15 +753,76 @@ function goHome() {
   go('home', {}, true);
 }
 
+/* ── SWIPE BACK ─────────────────────────────── */
+function setupSwipeBack(el) {
+  let sx, sy;
+  el.addEventListener('touchstart', e => {
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+  }, { passive: true });
+  el.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = Math.abs(e.changedTouches[0].clientY - sy);
+    if (sx < 40 && dx > 55 && dy < 70 && S.stack.length) {
+      haptic(12);
+      back();
+    }
+  }, { passive: true });
+}
+
+/* ── SCROLL BLUR HEADER ─────────────────────── */
+function setupScrollBlur(screenEl) {
+  const page = screenEl.querySelector('.page');
+  const hdr  = screenEl.querySelector('.hdr');
+  if (!page || !hdr) return;
+  page.addEventListener('scroll', () => {
+    hdr.classList.toggle('scrolled', page.scrollTop > 4);
+  }, { passive: true });
+}
+
+/* ── AUTO-ADVANCE INPUTS ────────────────────── */
+function autoAdvance(fromId, toId, maxLen) {
+  const from = document.getElementById(fromId);
+  const to   = document.getElementById(toId);
+  if (!from || !to) return;
+  from.addEventListener('input', () => {
+    if (from.value.length >= maxLen) { haptic(6); to.focus(); to.select(); }
+  });
+}
+
 /* ── AFTER RENDER HOOKS ─────────────────────── */
-function afterRender(id) {
-  // nothing extra needed for now
+function afterRender(id, params) {
+  const sc = document.getElementById(`sc-${id}`);
+  if (!sc) return;
+
+  setupSwipeBack(sc);
+  setupScrollBlur(sc);
+
+  // Auto-focus first input
+  requestAnimationFrame(() => {
+    const inp = sc.querySelector('input:not([disabled])');
+    if (inp && !inp.readOnly) inp.focus();
+  });
+
+  if (id === 'step1') {
+    autoAdvance('techS', 'techN', 3);
+    autoAdvance('techN', 'phone', 7);
+  }
+  if (id === 'step2') {
+    autoAdvance('pinfl', 'pSeria', 14);
+    autoAdvance('pSeria', 'pNum', 2);
+  }
+
+  // Success screen checkmark animation
+  if (id === 'success') {
+    haptic(30);
+  }
 }
 
 /* ── INIT ───────────────────────────────────── */
 function init() {
   go('splash', {}, true);
-  setTimeout(() => go('home', {}, true), 1600);
+  setTimeout(() => go('home', {}, true), 1100);
 }
 
 document.addEventListener('DOMContentLoaded', init);
