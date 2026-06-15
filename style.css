@@ -315,6 +315,30 @@ body {
   border: 2px solid var(--green);
 }
 
+.btn-soon {
+  background: var(--bg);
+  color: var(--gray2);
+  border: 1.5px solid var(--border);
+  cursor: not-allowed;
+  opacity: 1 !important;
+}
+
+.soon-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px;
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
+.prod-card--soon .prod-name { color: var(--gray); }
+.prod-card--soon .prod-price { color: var(--gray2); }
+
 /* ── STICKY BOTTOM ── */
 .bottom-bar {
   position: fixed;

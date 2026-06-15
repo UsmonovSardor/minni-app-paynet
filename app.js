@@ -309,7 +309,7 @@ function renderProdList() {
     </div>`;
 
   return list.map(p => `
-    <div class="prod-card">
+    <div class="prod-card ${p.live ? '' : 'prod-card--soon'}">
       <div class="prod-top">
         <div class="prod-icon" style="background:${p.bg}">${p.icon}</div>
         <div class="prod-info">
@@ -317,8 +317,12 @@ function renderProdList() {
           <div class="prod-desc">${p.desc}</div>
           <div class="prod-price">${fmt(p.price)} UZS <span>dan</span></div>
         </div>
+        ${!p.live ? '<span class="soon-badge">Tez orada</span>' : ''}
       </div>
-      <button class="btn btn-green" onclick="buyProduct('${p.id}')">Sotib olish</button>
+      ${p.live
+        ? `<button class="btn btn-green" onclick="buyProduct('${p.id}')">Sotib olish</button>`
+        : `<button class="btn btn-soon" disabled>Tez orada qo'shiladi</button>`
+      }
     </div>
   `).join('');
 }
@@ -327,8 +331,18 @@ function filterCat(id, el) {
   activeCat = id;
   document.querySelectorAll('.cat').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   const list = document.getElementById('prod-list');
-  if (list) list.innerHTML = renderProdList();
+  if (list) {
+    list.style.opacity = '0';
+    list.style.transform = 'translateY(6px)';
+    list.innerHTML = renderProdList();
+    requestAnimationFrame(() => {
+      list.style.transition = 'opacity .2s ease, transform .25s cubic-bezier(0.34,1.56,0.64,1)';
+      list.style.opacity = '1';
+      list.style.transform = 'translateY(0)';
+    });
+  }
 }
 
 function buyProduct(id) {
@@ -341,11 +355,7 @@ function buyProduct(id) {
   S.form = { govNumber: '', techSeria: '', techNumber: '', phone: '', pinfl: '', pSeria: '', pNumber: '' };
   S.stack = ['home'];
 
-  if (p.live) {
-    go('step1');
-  } else {
-    showToast("Tez orada qo'shiladi 🔜");
-  }
+  if (p.live) go('step1');
 }
 
 /* ── OSAGO STEP 1: Avto ma'lumotlari ────────── */
