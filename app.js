@@ -23,6 +23,7 @@ const S = {
     pNumber: '',
   },
   stack: [],
+  kasko: { brand: null, model: null, trim: null, year: null, price: null },
 };
 
 /* ── PRODUCTS ───────────────────────────────── */
@@ -45,7 +46,7 @@ const PRODUCTS = [
     cat: 'auto',
     icon: '🛡️',
     bg: '#D1FAE5',
-    live: false,
+    live: true,
   },
   {
     id: 'travel',
@@ -411,6 +412,12 @@ function buyProduct(id) {
     S.form = { govNumber: '', techSeria: '', techNumber: '', phone: '', pinfl: '', pSeria: '', pNumber: '' };
   }
   S.stack = ['home'];
+
+  if (id === 'kasko') {
+    S.kasko = { brand: null, model: null, trim: null, year: null, price: null };
+    go('kaskoBrand');
+    return;
+  }
 
   if (p.live) go('step1');
 }
@@ -838,6 +845,193 @@ function goHome() {
   go('home', {}, true);
 }
 
+/* ── KASKO: helpers ─────────────────────────── */
+function kaskoListHtml(items, onClick, labelFn) {
+  if (!items || !items.length) return '<div class="empty-title">Topilmadi</div>';
+  return items.map(it => {
+    const label = labelFn(it).replace(/'/g, "\\'");
+    return `<button class="period-btn" style="width:100%;margin-bottom:8px;text-align:left"
+      onclick="${onClick}(${it.id}, '${label}')">${labelFn(it) || ('#' + it.id)}</button>`;
+  }).join('');
+}
+
+/* ── KASKO: Brand ───────────────────────────── */
+SCREENS.kaskoBrand = () => `
+  ${hdrBack('KASKO')}
+  <div class="page">
+    ${stepBar(1, 4)}
+    <h2 class="section-title">Avtomobil markasi</h2>
+    <div id="kasko-list" class="form-group">
+      <div class="loading-text">Yuklanmoqda...</div>
+    </div>
+  </div>
+`;
+
+async function loadKaskoBrands() {
+  const el = document.getElementById('kasko-list');
+  try {
+    const r = await fetch(API + '/kasko/brands');
+    const data = await r.json();
+    const brands = data.brands || [];
+    if (el) el.innerHTML = kaskoListHtml(brands, 'pickKaskoBrand', b => b.name || b.title || '');
+  } catch (e) {
+    if (el) el.innerHTML = '<div class="empty-title">Yuklab bo\'lmadi</div>';
+    showToast(netErrorMsg(e), 'error');
+  }
+}
+
+function pickKaskoBrand(id, name) {
+  haptic(8);
+  S.kasko.brand = { id, name };
+  go('kaskoModel');
+}
+
+/* ── KASKO: Model ───────────────────────────── */
+SCREENS.kaskoModel = () => `
+  ${hdrBack('KASKO')}
+  <div class="page">
+    ${stepBar(2, 4)}
+    <h2 class="section-title">${S.kasko.brand?.name || ''} — model</h2>
+    <div id="kasko-list" class="form-group">
+      <div class="loading-text">Yuklanmoqda...</div>
+    </div>
+  </div>
+`;
+
+async function loadKaskoModels() {
+  const el = document.getElementById('kasko-list');
+  try {
+    const res = await apiPost('/kasko/cars/find/model', { brand_id: S.kasko.brand.id });
+    const models = res.models || [];
+    if (el) el.innerHTML = kaskoListHtml(models, 'pickKaskoModel', m => m.name || m.title || '');
+  } catch (e) {
+    if (el) el.innerHTML = '<div class="empty-title">Yuklab bo\'lmadi</div>';
+    showToast(netErrorMsg(e), 'error');
+  }
+}
+
+function pickKaskoModel(id, name) {
+  haptic(8);
+  S.kasko.model = { id, name };
+  go('kaskoTrim');
+}
+
+/* ── KASKO: Trim ────────────────────────────── */
+SCREENS.kaskoTrim = () => `
+  ${hdrBack('KASKO')}
+  <div class="page">
+    ${stepBar(3, 4)}
+    <h2 class="section-title">${S.kasko.model?.name || ''} — modifikatsiya</h2>
+    <div id="kasko-list" class="form-group">
+      <div class="loading-text">Yuklanmoqda...</div>
+    </div>
+  </div>
+`;
+
+async function loadKaskoTrims() {
+  const el = document.getElementById('kasko-list');
+  try {
+    const res = await apiPost('/kasko/cars/find/trim', { model_id: S.kasko.model.id });
+    const trims = res.carsTrim || [];
+    if (el) el.innerHTML = kaskoListHtml(trims, 'pickKaskoTrim', t => t.trim || '');
+  } catch (e) {
+    if (el) el.innerHTML = '<div class="empty-title">Yuklab bo\'lmadi</div>';
+    showToast(netErrorMsg(e), 'error');
+  }
+}
+
+function pickKaskoTrim(id, trim) {
+  haptic(8);
+  S.kasko.trim = { id, name: trim };
+  go('kaskoYear');
+}
+
+/* ── KASKO: Year ────────────────────────────── */
+SCREENS.kaskoYear = () => `
+  ${hdrBack('KASKO')}
+  <div class="page">
+    ${stepBar(4, 4)}
+    <h2 class="section-title">Ishlab chiqarilgan yili</h2>
+    <div id="kasko-list" class="form-group">
+      <div class="loading-text">Yuklanmoqda...</div>
+    </div>
+  </div>
+`;
+
+async function loadKaskoYears() {
+  const el = document.getElementById('kasko-list');
+  try {
+    const res = await apiPost('/kasko/cars/find/years', {
+      trim_id: S.kasko.trim.id,
+      model_id: S.kasko.model.id,
+      brand_id: S.kasko.brand.id,
+    });
+    // Backend turlicha javob qaytarishi mumkin: massiv sonlar yoki {year:..} obyektlar
+    let years = Array.isArray(res) ? res : (res.years || []);
+    years = years.map(y => (typeof y === 'object' ? y : { id: y, year: y }));
+    if (el) el.innerHTML = kaskoListHtml(years, 'pickKaskoYear', y => String(y.year ?? y.id));
+  } catch (e) {
+    if (el) el.innerHTML = '<div class="empty-title">Yuklab bo\'lmadi</div>';
+    showToast(netErrorMsg(e), 'error');
+  }
+}
+
+function pickKaskoYear(id, year) {
+  haptic(8);
+  S.kasko.year = year;
+  go('kaskoPrice');
+}
+
+/* ── KASKO: Price + redirect to full site ───── */
+SCREENS.kaskoPrice = () => `
+  ${hdrBack('KASKO')}
+  <div class="page">
+    <div class="price-card">
+      <div class="price-label">Taxminiy sug'urta narxi</div>
+      <div class="price-amount" id="kasko-price-amount">···</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-row"><span class="s-label">Marka</span><span class="s-val">${S.kasko.brand?.name || ''}</span></div>
+      <div class="summary-row"><span class="s-label">Model</span><span class="s-val">${S.kasko.model?.name || ''}</span></div>
+      <div class="summary-row"><span class="s-label">Modifikatsiya</span><span class="s-val">${S.kasko.trim?.name || ''}</span></div>
+      <div class="summary-row"><span class="s-label">Yil</span><span class="s-val">${S.kasko.year || ''}</span></div>
+    </div>
+    <div class="note">
+      <span>ℹ️</span>
+      <span>To'liq rasmiylashtirish va to'lov uchun kafil.uz saytidagi KASKO bo'limiga o'tasiz</span>
+    </div>
+  </div>
+  <div class="bottom-bar">
+    <button class="btn btn-green" onclick="goToKaskoSite()">To'liq rasmiylashtirish &rsaquo;</button>
+  </div>
+`;
+
+async function loadKaskoPrice() {
+  const el = document.getElementById('kasko-price-amount');
+  try {
+    const res = await apiPost('/kasko/cars/find/price/by/year', {
+      model_id: S.kasko.model.id,
+      trim: S.kasko.trim.name,
+      year: S.kasko.year,
+    });
+    const price = res.price ?? 0;
+    S.kasko.price = price;
+    if (el) el.innerHTML = `${fmt(price)} <small>UZS</small>`;
+  } catch (e) {
+    if (el) el.textContent = "Hisoblab bo'lmadi";
+    showToast(netErrorMsg(e), 'error');
+  }
+}
+
+function goToKaskoSite() {
+  haptic(10);
+  if (window.Telegram?.WebApp?.openLink) {
+    window.Telegram.WebApp.openLink('https://kafil.uz/uz/kasko/standart');
+  } else {
+    window.open('https://kafil.uz/uz/kasko/standart', '_blank');
+  }
+}
+
 /* ── SWIPE BACK ─────────────────────────────── */
 function setupSwipeBack(el) {
   let sx, sy;
@@ -897,6 +1091,12 @@ function afterRender(id, params) {
     autoAdvance('pinfl', 'pSeria', 14);
     autoAdvance('pSeria', 'pNum', 2);
   }
+
+  if (id === 'kaskoBrand') loadKaskoBrands();
+  if (id === 'kaskoModel') loadKaskoModels();
+  if (id === 'kaskoTrim')  loadKaskoTrims();
+  if (id === 'kaskoYear')  loadKaskoYears();
+  if (id === 'kaskoPrice') loadKaskoPrice();
 
   // Success screen checkmark animation
   if (id === 'success') {
