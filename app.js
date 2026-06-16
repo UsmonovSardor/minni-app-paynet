@@ -24,6 +24,7 @@ const S = {
   },
   stack: [],
   kasko: { brand: null, model: null, trim: null, year: null, price: null },
+  simple: { pid: null, phone: '' },
 };
 
 /* ── PRODUCTS ───────────────────────────────── */
@@ -56,7 +57,7 @@ const PRODUCTS = [
     cat: 'travel',
     icon: '✈️',
     bg: '#E0E7FF',
-    live: false,
+    live: true,
   },
   {
     id: 'accident',
@@ -66,7 +67,7 @@ const PRODUCTS = [
     cat: 'health',
     icon: '🏥',
     bg: '#FCE7F3',
-    live: false,
+    live: true,
   },
   {
     id: 'property',
@@ -76,7 +77,7 @@ const PRODUCTS = [
     cat: 'other',
     icon: '🏠',
     bg: '#FEF3C7',
-    live: false,
+    live: true,
   },
 ];
 
@@ -416,6 +417,12 @@ function buyProduct(id) {
   if (id === 'kasko') {
     S.kasko = { brand: null, model: null, trim: null, year: null, price: null };
     go('kaskoBrand');
+    return;
+  }
+
+  if (id === 'travel' || id === 'accident' || id === 'property') {
+    S.simple = { pid: id, phone: '' };
+    go('simpleForm', { pid: id });
     return;
   }
 
@@ -792,10 +799,16 @@ SCREENS.step4 = () => {
   `;
 };
 
+// Paynet API kelgach shu yerga integratsiya qilinadi.
+// Hozircha (Paynet ulanmagunicha) barcha mahsulotlar shu umumiy
+// "hisoblandi → muvaffaqiyat" oqimidan o'tadi.
+function fakeCheckout(amount, btnId) {
+  setBtnLoading(btnId, true);
+  setTimeout(() => { clearDraft(); go('success', { amount }); }, 1500);
+}
+
 function doPayment(amount) {
-  setBtnLoading('btn4', true);
-  // Paynet API kelgach shu yerga integratsiya qilinadi
-  setTimeout(() => { clearDraft(); go('success', { amount }); }, 2000);
+  fakeCheckout(amount, 'btn4');
 }
 
 /* ── SUCCESS ────────────────────────────────── */
@@ -998,16 +1011,17 @@ SCREENS.kaskoPrice = () => `
     </div>
     <div class="note">
       <span>ℹ️</span>
-      <span>To'liq rasmiylashtirish va to'lov uchun kafil.uz saytidagi KASKO bo'limiga o'tasiz</span>
+      <span>To'lovdan so'ng polis SMS va ilovaga yuboriladi</span>
     </div>
   </div>
   <div class="bottom-bar">
-    <button class="btn btn-green" onclick="goToKaskoSite()">To'liq rasmiylashtirish &rsaquo;</button>
+    <button id="btnKaskoPay" class="btn btn-green" disabled onclick="payKaskoNow()">Hisoblanmoqda...</button>
   </div>
 `;
 
 async function loadKaskoPrice() {
   const el = document.getElementById('kasko-price-amount');
+  const btn = document.getElementById('btnKaskoPay');
   try {
     const res = await apiPost('/kasko/cars/find/price/by/year', {
       model_id: S.kasko.model.id,
@@ -1017,19 +1031,107 @@ async function loadKaskoPrice() {
     const price = res.price ?? 0;
     S.kasko.price = price;
     if (el) el.innerHTML = `${fmt(price)} <small>UZS</small>`;
+    if (btn) { btn.disabled = false; btn.textContent = `To'lash ${fmt(price)} UZS 🔒`; }
   } catch (e) {
     if (el) el.textContent = "Hisoblab bo'lmadi";
+    if (btn) btn.textContent = "Qayta urinib ko'ring";
     showToast(netErrorMsg(e), 'error');
   }
 }
 
-function goToKaskoSite() {
+function payKaskoNow() {
   haptic(10);
-  if (window.Telegram?.WebApp?.openLink) {
-    window.Telegram.WebApp.openLink('https://kafil.uz/uz/kasko/standart');
-  } else {
-    window.open('https://kafil.uz/uz/kasko/standart', '_blank');
-  }
+  fakeCheckout(Number(S.kasko.price) || 0, 'btnKaskoPay');
+}
+
+/* ── SIMPLE FLOW: Travel / Accident / Property ──
+   (Backendda hali to'liq calculate API tayyor emas,
+   shu uchun PRODUCTS'dagi tayyor narx ko'rsatiladi,
+   OSAGO'dagi kabi to'lov→muvaffaqiyat oqimi ishlaydi) */
+SCREENS.simpleForm = (params) => {
+  const p = PRODUCTS.find(x => x.id === params.pid) || {};
+  return `
+  ${hdrBack(p.name || '')}
+  <div class="page">
+    ${stepBar(1, 2)}
+    <h2 class="section-title">Aloqa ma'lumotlari</h2>
+
+    <div class="form-group">
+      <label class="form-label">Telefon raqamingiz</label>
+      <div class="input-row">
+        <span class="phone-prefix">+998</span>
+        <input id="simplePhone" type="tel" class="form-input"
+          placeholder="90 123 45 67"
+          value="${S.simple.phone}"
+          inputmode="numeric"
+          maxlength="12"
+          oninput="fmtPhone(this)">
+      </div>
+    </div>
+
+    <div class="contact-block">
+      <p>Yagona aloqa markazi</p>
+      <a href="tel:+998712000414">📞 +998 71 200 04 14</a>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <button id="btnSimple1" class="btn btn-green" onclick="submitSimpleForm('${params.pid}')">
+      Davom etish &rsaquo;
+    </button>
+  </div>
+  `;
+};
+
+function submitSimpleForm(pid) {
+  const ph = (document.getElementById('simplePhone')?.value || '').replace(/\D/g, '');
+  if (ph.length < 9) { haptic(20); shakeInput('simplePhone'); showToast('Telefon raqamini kiriting', 'error'); return; }
+  S.simple = { pid, phone: ph };
+  go('simplePrice', { pid });
+}
+
+SCREENS.simplePrice = (params) => {
+  const p = PRODUCTS.find(x => x.id === params.pid) || {};
+  return `
+  ${hdrBack(p.name || '')}
+  <div class="page">
+    ${stepBar(2, 2)}
+
+    <div class="price-card">
+      <div class="price-label">Sug'urta narxi</div>
+      <div class="price-amount">${fmt(p.price)} <small>UZS</small></div>
+    </div>
+
+    <div class="summary-card">
+      <div class="summary-row">
+        <span class="s-label">Mahsulot</span>
+        <span class="s-val">${p.name || ''}</span>
+      </div>
+      <div class="summary-row">
+        <span class="s-label">Telefon</span>
+        <span class="s-val">+998 ${S.simple.phone}</span>
+      </div>
+    </div>
+
+    <div class="note">
+      <span>ℹ️</span>
+      <span>To'lovdan so'ng polis SMS va ilovaga yuboriladi</span>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <button id="btnSimplePay" class="btn btn-green" onclick="paySimpleNow('${params.pid}')">
+      To'lash ${fmt(p.price)} UZS 🔒
+    </button>
+  </div>
+  `;
+};
+
+function paySimpleNow(pid) {
+  haptic(10);
+  const p = PRODUCTS.find(x => x.id === pid) || {};
+  const amount = typeof p.price === 'string' ? parseFloat(p.price.replace(/\s/g, '')) : Number(p.price) || 0;
+  fakeCheckout(amount, 'btnSimplePay');
 }
 
 /* ── SWIPE BACK ─────────────────────────────── */
