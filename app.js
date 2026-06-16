@@ -136,14 +136,27 @@ function back() {
 }
 
 /* ── API CALLS ──────────────────────────────── */
-async function apiPost(path, data) {
-  const r = await fetch(API + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(data),
-  });
-  const json = await r.json();
-  return json;
+async function apiPost(path, data, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(API + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(data),
+      signal: ctrl.signal,
+    });
+    return await r.json();
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      const timeoutErr = new Error('TIMEOUT');
+      timeoutErr.isTimeout = true;
+      throw timeoutErr;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /* ── HELPERS ────────────────────────────────── */
@@ -155,6 +168,41 @@ function fmt(n) {
 
 function haptic(ms = 8) {
   try { if (navigator.vibrate) navigator.vibrate(ms); } catch {}
+}
+
+function netErrorMsg(e) {
+  if (e && e.isTimeout) return "Internet sekin — qaytadan urinib ko'ring";
+  return "Server bilan bog'lanib bo'lmadi";
+}
+
+/* ── DRAFT PERSISTENCE (resume after accidental close) ───── */
+const DRAFT_KEY = 'kf_draft_v1';
+const DRAFT_TTL = 30 * 60 * 1000; // 30 min
+
+function saveDraft() {
+  try {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+      t: Date.now(),
+      pid: S.product?.id,
+      form: S.form,
+      period: S.period,
+      territory: S.territory,
+    }));
+  } catch {}
+}
+
+function loadDraft(pid) {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (d.pid !== pid || Date.now() - d.t > DRAFT_TTL) return null;
+    return d;
+  } catch { return null; }
+}
+
+function clearDraft() {
+  try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
 }
 
 function shakeInput(id) {
@@ -351,8 +399,17 @@ function buyProduct(id) {
   if (!p) return;
   S.product = p;
   S.vehicle = null; S.owner = null; S.calc = null;
-  S.period = 12; S.territory = 1;
-  S.form = { govNumber: '', techSeria: '', techNumber: '', phone: '', pinfl: '', pSeria: '', pNumber: '' };
+
+  const draft = loadDraft(id);
+  if (draft) {
+    S.form = { govNumber: '', techSeria: '', techNumber: '', phone: '', pinfl: '', pSeria: '', pNumber: '', ...draft.form };
+    S.period = draft.period ?? 12;
+    S.territory = draft.territory ?? 1;
+    showToast("Avvalgi ma'lumotlar tiklandi");
+  } else {
+    S.period = 12; S.territory = 1;
+    S.form = { govNumber: '', techSeria: '', techNumber: '', phone: '', pinfl: '', pSeria: '', pNumber: '' };
+  }
   S.stack = ['home'];
 
   if (p.live) go('step1');
@@ -444,6 +501,7 @@ async function submitStep1() {
   S.form.techSeria = ts;
   S.form.techNumber = tn;
   S.form.phone = ph;
+  saveDraft();
 
   setBtnLoading('btn1', true);
   try {
@@ -461,8 +519,8 @@ async function submitStep1() {
 
     S.vehicle = res;
     go('step2');
-  } catch {
-    showToast("Server bilan bog'lanib bo'lmadi", 'error');
+  } catch (e) {
+    showToast(netErrorMsg(e), 'error');
     setBtnLoading('btn1', false);
   }
 }
@@ -538,6 +596,7 @@ async function submitStep2() {
   S.form.pinfl   = pinfl;
   S.form.pSeria  = ps;
   S.form.pNumber = pn;
+  saveDraft();
 
   setBtnLoading('btn2', true);
   try {
@@ -555,8 +614,8 @@ async function submitStep2() {
 
     S.owner = res.driver || res;
     go('step3');
-  } catch {
-    showToast("Server bilan bog'lanib bo'lmadi", 'error');
+  } catch (e) {
+    showToast(netErrorMsg(e), 'error');
     setBtnLoading('btn2', false);
   }
 }
@@ -661,8 +720,8 @@ async function submitStep3() {
 
     S.calc = res;
     go('step4');
-  } catch {
-    showToast("Server bilan bog'lanib bo'lmadi", 'error');
+  } catch (e) {
+    showToast(netErrorMsg(e), 'error');
     setBtnLoading('btn3', false);
   }
 }
@@ -729,7 +788,7 @@ SCREENS.step4 = () => {
 function doPayment(amount) {
   setBtnLoading('btn4', true);
   // Paynet API kelgach shu yerga integratsiya qilinadi
-  setTimeout(() => go('success', { amount }), 2000);
+  setTimeout(() => { clearDraft(); go('success', { amount }); }, 2000);
 }
 
 /* ── SUCCESS ────────────────────────────────── */
@@ -746,8 +805,8 @@ SCREENS.success = (p) => {
       Sug'urta polisi muvaffaqiyatli rasmiylashtirildi.<br>
       SMS orqali telefoningizga yuboriladi.
     </p>
-    <div class="success-badge">
-      <span>Polis raqami</span>
+    <div class="success-badge success-badge--copy" onclick="copyPolicyNum('${policyNum}', this)">
+      <span>Polis raqami · nusxalash uchun bosing</span>
       <strong>${policyNum}</strong>
     </div>
     <button class="btn btn-green" style="width:220px" onclick="goHome()">
@@ -756,6 +815,22 @@ SCREENS.success = (p) => {
   </div>
   `;
 };
+
+function copyPolicyNum(num, el) {
+  haptic(10);
+  const done = () => {
+    const span = el.querySelector('span');
+    const orig = span.textContent;
+    span.textContent = 'Nusxalandi ✓';
+    el.classList.add('copied');
+    setTimeout(() => { span.textContent = orig; el.classList.remove('copied'); }, 1500);
+  };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(num).then(done).catch(done);
+  } else {
+    done();
+  }
+}
 
 function goHome() {
   activeCat = 'all';

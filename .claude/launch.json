@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kafil-mini-app",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "3456", "."],
+      "port": 3456
+    }
+  ]
+}

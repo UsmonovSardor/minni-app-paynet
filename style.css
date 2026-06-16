@@ -671,6 +671,17 @@ body {
   margin-bottom: 32px;
 }
 .success-badge strong { color: var(--dark); display: block; font-size: 16px; }
+.success-badge--copy {
+  cursor: pointer;
+  transition: var(--tr);
+  border: 1.5px solid transparent;
+}
+.success-badge--copy:active { transform: scale(.97); }
+.success-badge--copy.copied {
+  background: #FEF2F2;
+  border-color: #FECACA;
+}
+.success-badge--copy.copied span { color: var(--green2); font-weight: 600; }
 
 /* ── EMPTY ── */
 .empty {
