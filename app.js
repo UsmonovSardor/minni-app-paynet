@@ -25,6 +25,13 @@ const S = {
   stack: [],
   kasko: { brand: null, model: null, trim: null, year: null, price: null },
   simple: { pid: null, phone: '' },
+  travel: {
+    country: '', countryLabel: '', program: 'BASIC', repeat: 1,
+    startDate: '', endDate: '', days: '', purpose: 'TOURISM',
+    person: { pinfl: '', pSeria: '', pNumber: '', firstName: '', lastName: '', surName: '',
+      gender: 'm', birthDate: '', address: '', phone: '' },
+    premium: null, insuredAmount: null, agreement: null,
+  },
 };
 
 /* ── PRODUCTS ───────────────────────────────── */
@@ -420,7 +427,19 @@ function buyProduct(id) {
     return;
   }
 
-  if (id === 'travel' || id === 'accident' || id === 'property') {
+  if (id === 'travel') {
+    S.travel = {
+      country: '', countryLabel: '', program: 'BASIC', repeat: 1,
+      startDate: '', endDate: '', days: '', purpose: 'TOURISM',
+      person: { pinfl: '', pSeria: '', pNumber: '', firstName: '', lastName: '', surName: '',
+        gender: 'm', birthDate: '', address: '', phone: '' },
+      premium: null, insuredAmount: null, agreement: null,
+    };
+    go('travelTrip');
+    return;
+  }
+
+  if (id === 'accident' || id === 'property') {
     S.simple = { pid: id, phone: '' };
     go('simpleForm', { pid: id });
     return;
@@ -1134,6 +1153,325 @@ function paySimpleNow(pid) {
   fakeCheckout(amount, 'btnSimplePay');
 }
 
+/* ── TRAVEL: real backend (kafil.uz asosiy saytidagi
+   /travel/calculate, /travel/create bilan bir xil mantiq,
+   mini-app uchun CSRF'siz /api/travel/* orqali) ───────── */
+const TRAVEL_PROGRAMS = ['BASIC', 'OPTIMAL', 'LUXURY'];
+const TRAVEL_PURPOSES = [
+  { val: 'TOURISM', label: 'Turizm' },
+  { val: 'STUDY',   label: "O'qish" },
+  { val: 'WORK',    label: 'Ish' },
+  { val: 'SPORT',   label: 'Sport' },
+];
+
+let travelCountries = null; // lazy-loaded, cached
+
+SCREENS.travelTrip = () => `
+  ${hdrBack("Sayohat sug'urtasi")}
+  <div class="page">
+    ${stepBar(1, 3)}
+    <h2 class="section-title">Sayohat ma'lumotlari</h2>
+
+    <div class="form-group">
+      <label class="form-label">Mamlakat</label>
+      <select id="trCountry" class="form-input">
+        <option value="">Yuklanmoqda...</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Dastur</label>
+      <select id="trProgram" class="form-input">
+        ${TRAVEL_PROGRAMS.map(p => `<option value="${p}" ${p === S.travel.program ? 'selected' : ''}>${p}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Sayohat takroriyligi</label>
+      <select id="trRepeat" class="form-input">
+        <option value="1" ${S.travel.repeat === 1 ? 'selected' : ''}>Bir martalik</option>
+        <option value="2" ${S.travel.repeat === 2 ? 'selected' : ''}>Ko'p martalik</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Sayohat sanasi (dan)</label>
+      <input id="trStart" type="date" class="form-input" value="${S.travel.startDate}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Sayohat sanasi (gacha)</label>
+      <input id="trEnd" type="date" class="form-input" value="${S.travel.endDate}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Sayohat maqsadi</label>
+      <select id="trPurpose" class="form-input">
+        ${TRAVEL_PURPOSES.map(p => `<option value="${p.val}" ${p.val === S.travel.purpose ? 'selected' : ''}>${p.label}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <button id="btnTravel1" class="btn btn-green" onclick="submitTravelTrip()">
+      Davom etish &rsaquo;
+    </button>
+  </div>
+`;
+
+async function loadTravelCountries() {
+  const sel = document.getElementById('trCountry');
+  if (!sel) return;
+  try {
+    if (!travelCountries) {
+      const res = await fetch(API + '/references/countriec');
+      const data = await res.json();
+      travelCountries = Array.isArray(data) ? data : (data.countries || data.data || []);
+    }
+    if (!travelCountries.length) throw new Error('empty');
+    sel.innerHTML = '<option value="">Tanlang...</option>' + travelCountries.map(c => {
+      const label = c.name_uz || c.name_en || c.name_ru || c.name || ('#' + (c.id ?? ''));
+      const value = c.name_en || c.name_uz || c.name || label;
+      const sameLabel = label.replace(/"/g, '&quot;');
+      return `<option value="${value.replace(/"/g, '&quot;')}" ${value === S.travel.country ? 'selected' : ''}>${sameLabel}</option>`;
+    }).join('');
+  } catch (e) {
+    // Backend ro'yxati olinmasa — qo'lda kiritish imkonini beramiz
+    sel.outerHTML = `<input id="trCountry" type="text" class="form-input" placeholder="Mamlakat nomi (masalan: Turkey)" value="${S.travel.country}">`;
+  }
+}
+
+function submitTravelTrip() {
+  const countryEl = document.getElementById('trCountry');
+  const country = (countryEl?.value || '').trim();
+  const program = document.getElementById('trProgram')?.value || 'BASIC';
+  const repeat = Number(document.getElementById('trRepeat')?.value || 1);
+  const start = document.getElementById('trStart')?.value || '';
+  const end = document.getElementById('trEnd')?.value || '';
+  const purpose = document.getElementById('trPurpose')?.value || 'TOURISM';
+
+  if (!country) { haptic(20); showToast('Mamlakatni tanlang', 'error'); return; }
+  if (!start || !end) { haptic(20); showToast('Sayohat sanalarini kiriting', 'error'); return; }
+
+  const days = Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000) + 1);
+  if (days < 1 || isNaN(days)) { haptic(20); showToast("Sanalar noto'g'ri", 'error'); return; }
+
+  S.travel.country = country;
+  S.travel.program = program;
+  S.travel.repeat = repeat;
+  S.travel.startDate = start;
+  S.travel.endDate = end;
+  S.travel.days = days;
+  S.travel.purpose = purpose;
+
+  go('travelPerson');
+}
+
+/* ── TRAVEL: Sayohatchi ma'lumotlari ─────────── */
+SCREENS.travelPerson = () => {
+  const p = S.travel.person;
+  return `
+  ${hdrBack("Sayohat sug'urtasi")}
+  <div class="page">
+    ${stepBar(2, 3)}
+    <h2 class="section-title">Sayohatchi ma'lumotlari</h2>
+
+    <div class="form-group">
+      <label class="form-label">Ism</label>
+      <input id="trFirst" type="text" class="form-input" value="${p.firstName}" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Familiya</label>
+      <input id="trLast" type="text" class="form-input" value="${p.lastName}" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Tug'ilgan sana</label>
+      <input id="trBirth" type="date" class="form-input" value="${p.birthDate}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">PINFL (14 ta raqam)</label>
+      <input id="trPinfl" type="text" class="form-input" maxlength="14" inputmode="numeric" value="${p.pinfl}" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pasport seriya va raqami</label>
+      <div class="input-row">
+        <input id="trPSeria" type="text" class="form-input" placeholder="AA" maxlength="2" style="width:72px;flex-shrink:0"
+          value="${p.pSeria}" oninput="this.value=this.value.toUpperCase()" autocomplete="off">
+        <input id="trPNumber" type="text" class="form-input" placeholder="1234567" maxlength="7" value="${p.pNumber}" autocomplete="off">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Telefon raqamingiz</label>
+      <div class="input-row">
+        <span class="phone-prefix">+998</span>
+        <input id="trPhone" type="tel" class="form-input" placeholder="90 123 45 67" inputmode="numeric" maxlength="12"
+          value="${p.phone}" oninput="fmtPhone(this)">
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <button id="btnTravel2" class="btn btn-green" onclick="submitTravelPerson()">
+      Hisoblash &rsaquo;
+    </button>
+  </div>
+  `;
+};
+
+async function submitTravelPerson() {
+  const firstName = (document.getElementById('trFirst')?.value || '').trim();
+  const lastName  = (document.getElementById('trLast')?.value || '').trim();
+  const birthDate = document.getElementById('trBirth')?.value || '';
+  const pinfl     = (document.getElementById('trPinfl')?.value || '').trim();
+  const pSeria    = (document.getElementById('trPSeria')?.value || '').toUpperCase().trim();
+  const pNumber   = (document.getElementById('trPNumber')?.value || '').trim();
+  const phone     = (document.getElementById('trPhone')?.value || '').replace(/\D/g, '');
+
+  if (!firstName || !lastName) { haptic(20); showToast("Ism-familiyani kiriting", 'error'); return; }
+  if (!birthDate)               { haptic(20); showToast("Tug'ilgan sanani kiriting", 'error'); return; }
+  if (pinfl.length !== 14)      { haptic(20); shakeInput('trPinfl'); showToast('PINFL 14 ta raqamdan iborat', 'error'); return; }
+  if (pSeria.length < 2)        { haptic(20); shakeInput('trPSeria'); showToast('Pasport seriasini kiriting', 'error'); return; }
+  if (pNumber.length < 7)       { haptic(20); shakeInput('trPNumber'); showToast('Pasport raqamini kiriting', 'error'); return; }
+  if (phone.length < 9)         { haptic(20); shakeInput('trPhone'); showToast('Telefon raqamini kiriting', 'error'); return; }
+
+  S.travel.person = {
+    firstName, lastName, surName: '', gender: 'm',
+    birthDate, pinfl, pSeria, pNumber, phone,
+    address: '', regionId: 10,
+  };
+
+  setBtnLoading('btnTravel2', true);
+  try {
+    const agreement = {
+      agreementDate: new Date().toISOString().split('T')[0],
+      periodStartDate: S.travel.startDate,
+      periodEndDate: S.travel.endDate,
+      daysCount: String(S.travel.days),
+      isBaggageInsured: 0,
+      isShengen: 'false',
+      daysCountForSchengen: '0',
+      destinationCountries: S.travel.country,
+      travelMultipleTypeId: String(S.travel.repeat),
+      periodEndDateTypeId: null,
+      periodEndDateTypeName: '',
+      travelProgramId: null,
+      travelProgramName: S.travel.program,
+      travelTargetTariffId: null,
+      travelTargetTariffName: S.travel.purpose,
+      travelFamilyTariffId: '',
+      travelFamilyTariffName: '',
+      travelGroupTariffId: '',
+      travelGroupTariffName: '',
+      travelHealthProtectionTariffId: null,
+      travelHealthProtectionTariffName: '',
+    };
+
+    const insuredPersons = [{
+      pinfl,
+      applicant_passportSeries: pSeria,
+      applicant_passportNumber: pNumber,
+      firstName, lastName, surName: '',
+      gender: 'm',
+      birthDate,
+      regionId: 10,
+      regionIdForEosgoUz: 10,
+      residentTypeId: 1,
+      countryId: 210,
+      address: '',
+      phone,
+    }];
+
+    const res = await apiPost('/travel/calculate', { agreement, insuredPersons });
+    const body = typeof res === 'string' ? JSON.parse(res) : res;
+    const result = body?.operationResult;
+
+    if (!result || result.result) {
+      showToast(result?.errorMessage || "Hisoblashda xatolik (backend hali tayyor bo'lmasligi mumkin)", 'error');
+      setBtnLoading('btnTravel2', false);
+      return;
+    }
+
+    S.travel.agreement = { ...agreement, ...result.data };
+    S.travel.premium = result.data?.premiumAmount ?? 0;
+    S.travel.insuredAmount = result.data?.insuredAmount ?? 0;
+    go('travelPrice');
+  } catch (e) {
+    showToast(netErrorMsg(e), 'error');
+    setBtnLoading('btnTravel2', false);
+  }
+}
+
+/* ── TRAVEL: Narx va order yaratish ──────────── */
+SCREENS.travelPrice = () => `
+  ${hdrBack("Sayohat sug'urtasi")}
+  <div class="page">
+    ${stepBar(3, 3)}
+    <div class="price-card">
+      <div class="price-label">Sug'urta mukofoti</div>
+      <div class="price-amount">${fmt(S.travel.premium)} <small>UZS</small></div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-row"><span class="s-label">Mamlakat</span><span class="s-val">${S.travel.country}</span></div>
+      <div class="summary-row"><span class="s-label">Dastur</span><span class="s-val">${S.travel.program}</span></div>
+      <div class="summary-row"><span class="s-label">Muddat</span><span class="s-val">${S.travel.days} kun</span></div>
+      <div class="summary-row"><span class="s-label">Sayohatchi</span><span class="s-val">${S.travel.person.firstName} ${S.travel.person.lastName}</span></div>
+    </div>
+    <div class="note">
+      <span>ℹ️</span>
+      <span>Buyurtma tizimda saqlanadi, to'lov ulanganidan keyin polis chiqariladi</span>
+    </div>
+  </div>
+  <div class="bottom-bar">
+    <button id="btnTravel3" class="btn btn-green" onclick="submitTravelOrder()">
+      To'lash ${fmt(S.travel.premium)} UZS 🔒
+    </button>
+  </div>
+`;
+
+async function submitTravelOrder() {
+  setBtnLoading('btnTravel3', true);
+  const p = S.travel.person;
+  try {
+    const res = await apiPost('/travel/create', {
+      agreement: S.travel.agreement,
+      client: {
+        firstName: p.firstName, lastName: p.lastName, surName: '',
+        pinfl: p.pinfl,
+        applicant_passportSeries: p.pSeria,
+        applicant_passportNumber: p.pNumber,
+        regionIdForEosgoUz: 10,
+        gender: true,
+        birthday: p.birthDate,
+        address: '',
+        phone: p.phone,
+      },
+      insuredPersons: [{
+        pinfl: p.pinfl,
+        applicant_passportSeries: p.pSeria,
+        applicant_passportNumber: p.pNumber,
+        firstName: p.firstName, lastName: p.lastName, surName: '',
+        gender: 'm',
+        birthDate: p.birthDate,
+        regionId: 10, regionIdForEosgoUz: 10,
+        residentTypeId: 1, countryId: 210,
+        address: '', phone: p.phone,
+      }],
+    });
+
+    if (res?.id === undefined || res?.id === null) {
+      showToast("Buyurtma yaratilmadi (backend hali tayyor bo'lmasligi mumkin)", 'error');
+      setBtnLoading('btnTravel3', false);
+      return;
+    }
+
+    clearDraft();
+    go('success', { amount: S.travel.premium });
+  } catch (e) {
+    showToast(netErrorMsg(e), 'error');
+    setBtnLoading('btnTravel3', false);
+  }
+}
+
 /* ── SWIPE BACK ─────────────────────────────── */
 function setupSwipeBack(el) {
   let sx, sy;
@@ -1199,6 +1537,7 @@ function afterRender(id, params) {
   if (id === 'kaskoTrim')  loadKaskoTrims();
   if (id === 'kaskoYear')  loadKaskoYears();
   if (id === 'kaskoPrice') loadKaskoPrice();
+  if (id === 'travelTrip') loadTravelCountries();
 
   // Success screen checkmark animation
   if (id === 'success') {
