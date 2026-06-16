@@ -45,7 +45,7 @@ const PRODUCTS = [
     cat: 'auto',
     icon: '🛡️',
     bg: '#D1FAE5',
-    live: true,
+    live: false,
   },
   {
     id: 'travel',
@@ -55,7 +55,7 @@ const PRODUCTS = [
     cat: 'travel',
     icon: '✈️',
     bg: '#E0E7FF',
-    live: true,
+    live: false,
   },
   {
     id: 'accident',
@@ -65,7 +65,7 @@ const PRODUCTS = [
     cat: 'health',
     icon: '🏥',
     bg: '#FCE7F3',
-    live: true,
+    live: false,
   },
   {
     id: 'property',
@@ -75,7 +75,7 @@ const PRODUCTS = [
     cat: 'other',
     icon: '🏠',
     bg: '#FEF3C7',
-    live: true,
+    live: false,
   },
 ];
 
